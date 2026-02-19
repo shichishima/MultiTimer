@@ -45,37 +45,37 @@ struct ContentView: View {
     }
 
     private var timerGrid: some View {
-        TimelineView(.periodic(from: Date(), by: 1.0)) { _ in
-            GeometryReader { geo in
-                let columns = store.data.visibleUsers
-                let colCount = max(1, columns.count)
-                let cellW = geo.size.width / CGFloat(colCount)
-                // 5行 (1見出し + 4タイマー)
-                let cellH = geo.size.height / 5.0
+        // store.tick を読むことで毎秒再描画される（@Observable の依存追跡を利用）
+        let _ = store.tick
+        return GeometryReader { geo in
+            let columns = store.data.visibleUsers
+            let colCount = max(1, columns.count)
+            let cellW = geo.size.width / CGFloat(colCount)
+            // 5行 (1見出し + 4タイマー)
+            let cellH = geo.size.height / 5.0
 
-                VStack(spacing: 0) {
-                    // ヘッダー行
+            VStack(spacing: 0) {
+                // ヘッダー行
+                HStack(spacing: 0) {
+                    ForEach(columns) { user in
+                        HeaderCellView(name: user.name, width: cellW, height: cellH)
+                    }
+                }
+                // タイマー行 (最大4行)
+                ForEach(0..<4, id: \.self) { rowIndex in
                     HStack(spacing: 0) {
                         ForEach(columns) { user in
-                            HeaderCellView(name: user.name, width: cellW, height: cellH)
-                        }
-                    }
-                    // タイマー行 (最大4行)
-                    ForEach(0..<4, id: \.self) { rowIndex in
-                        HStack(spacing: 0) {
-                            ForEach(columns) { user in
-                                let slotIds = store.data.slotIds(for: user.id)
-                                if rowIndex < slotIds.count {
-                                    let slotId = slotIds[rowIndex]
-                                    TimerCellView(slotId: slotId, userId: user.id,
-                                                  cellWidth: cellW, cellHeight: cellH)
-                                } else {
-                                    // 空セル
-                                    Rectangle()
-                                        .fill(Color.clear)
-                                        .frame(width: cellW, height: cellH)
-                                        .border(Color.gray.opacity(0.15))
-                                }
+                            let slotIds = store.data.slotIds(for: user.id)
+                            if rowIndex < slotIds.count {
+                                let slotId = slotIds[rowIndex]
+                                TimerCellView(slotId: slotId, userId: user.id,
+                                              cellWidth: cellW, cellHeight: cellH)
+                            } else {
+                                // 空セル
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .frame(width: cellW, height: cellH)
+                                    .border(Color.gray.opacity(0.15))
                             }
                         }
                     }

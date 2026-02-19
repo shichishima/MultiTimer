@@ -24,7 +24,9 @@ struct TimerCellView: View {
     private var colorBarWidth: CGFloat { cellWidth * 0.055 }
 
     var body: some View {
-        ZStack {
+        // store.tick を読むことで毎秒再描画される
+        let _ = store.tick
+        return ZStack {
             // ベースセル
             HStack(spacing: 0) {
                 // 色バー (連携タイマーのみ)

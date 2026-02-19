@@ -13,6 +13,8 @@ import UserNotifications
 final class TimerStore {
     var data: AppData = AppData()
     var saveErrorMessage: String? = nil
+    /// 毎秒インクリメント → これを購読するビューが1秒ごとに再描画される
+    var tick: Int = 0
 
     /// 動作中タイマーの満了検知用
     private var previouslyRunningIds: Set<String> = []
@@ -102,6 +104,7 @@ final class TimerStore {
     }
 
     private func checkForNewlyExpired() {
+        tick += 1  // 毎秒インクリメントしてビューの再描画をトリガー
         var soundNeeded = false
         for slot in data.timerSlots {
             if previouslyRunningIds.contains(slot.id) && !slot.isRunning {
