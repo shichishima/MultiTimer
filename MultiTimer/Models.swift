@@ -65,6 +65,7 @@ struct AppData: Codable {
     var links: [TimerLink]
     var timerSlots: [TimerSlot]
     var lastModified: Date
+    var checkStates: [String: Bool] = [:]
 
     init() {
         let names = ["利用者A", "利用者B", "利用者C", "利用者D", "利用者E", "利用者F"]
@@ -206,6 +207,7 @@ let timerDurations: [TimerDuration] = [
     TimerDuration(label: "45分",   seconds:  2700),
     TimerDuration(label: "30分",   seconds:  1800),
     TimerDuration(label: "20分",   seconds:  1200),
+    TimerDuration(label: "15分",   seconds:   900),
     TimerDuration(label: "10分",   seconds:   600),
     TimerDuration(label: "5分",    seconds:   300),
     TimerDuration(label: "3分",    seconds:   180),

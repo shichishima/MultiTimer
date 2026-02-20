@@ -1,34 +1,53 @@
 import Foundation
 
-// MARK: - File URL
+// MARK: - Security Scoped Bookmark (macOS)
 
-extension FileManager {
-    var multiTimerDataURL: URL {
-        #if os(macOS)
-        let base = urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        #else
-        let base = urls(for: .documentDirectory, in: .userDomainMask).first!
-        #endif
-        let dir = base.appendingPathComponent("naoki.MultiTimer", isDirectory: true)
-        try? createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("data.yaml")
+#if os(macOS)
+private let bookmarkKey = "dataFolderBookmark"
+
+func saveBookmark(url: URL) {
+    do {
+        let data = try url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        UserDefaults.standard.set(data, forKey: bookmarkKey)
+    } catch {}
+}
+
+func resolveBookmark() -> URL? {
+    guard let data = UserDefaults.standard.data(forKey: bookmarkKey) else { return nil }
+    var isStale = false
+    do {
+        let url = try URL(
+            resolvingBookmarkData: data,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
+        if isStale { saveBookmark(url: url) }
+        return url
+    } catch {
+        return nil
     }
 }
+#endif
 
 // MARK: - Save / Load
 
-func saveAppData(_ data: AppData) throws {
+func saveAppData(_ data: AppData, to folderURL: URL) throws {
     let yaml = encodeAppDataYAML(data)
-    try yaml.write(to: FileManager.default.multiTimerDataURL,
-                   atomically: true, encoding: .utf8)
+    let fileURL = folderURL.appendingPathComponent("MultiTimer.yml")
+    try yaml.write(to: fileURL, atomically: true, encoding: .utf8)
 }
 
-func loadAppData() throws -> AppData {
-    let url = FileManager.default.multiTimerDataURL
-    guard FileManager.default.fileExists(atPath: url.path) else {
+func loadAppData(from folderURL: URL) throws -> AppData {
+    let fileURL = folderURL.appendingPathComponent("MultiTimer.yml")
+    guard FileManager.default.fileExists(atPath: fileURL.path) else {
         return AppData()
     }
-    let yaml = try String(contentsOf: url, encoding: .utf8)
+    let yaml = try String(contentsOf: fileURL, encoding: .utf8)
     return try decodeAppDataYAML(yaml)
 }
 
@@ -83,6 +102,17 @@ private func encodeAppDataYAML(_ data: AppData) -> String {
         }
     }
 
+    let sortedCheckStates = data.checkStates.sorted { $0.key < $1.key }
+    if sortedCheckStates.isEmpty {
+        lines.append("checkStates: []")
+    } else {
+        lines.append("checkStates:")
+        for (key, value) in sortedCheckStates {
+            lines.append("  - key: \(ys(key))")
+            lines.append("    value: \(ys(value ? "true" : "false"))")
+        }
+    }
+
     return lines.joined(separator: "\n") + "\n"
 }
 
@@ -100,15 +130,16 @@ private enum YAMLDecodeError: Error {
     case malformed(String)
 }
 
-private func decodeAppDataYAML(_ yaml: String) throws -> AppData {
+func decodeAppDataYAML(_ yaml: String) throws -> AppData {
     let iso = ISO8601DateFormatter()
 
     var lastModified = Date()
     var users: [AppUser] = []
     var links: [TimerLink] = []
     var timerSlots: [TimerSlot] = []
+    var checkStates: [String: Bool] = [:]
 
-    enum Section { case none, users, links, timerSlots }
+    enum Section { case none, users, links, timerSlots, checkStates }
     var section = Section.none
     var item: [String: String] = [:]
 
@@ -121,6 +152,11 @@ private func decodeAppDataYAML(_ yaml: String) throws -> AppData {
             if let l = parseLink(item) { links.append(l) }
         case .timerSlots:
             if let s = parseSlot(item, iso: iso) { timerSlots.append(s) }
+        case .checkStates:
+            if let key = item["key"], !key.isEmpty,
+               let valueStr = item["value"] {
+                checkStates[key] = (valueStr == "true")
+            }
         case .none:
             break
         }
@@ -142,6 +178,8 @@ private func decodeAppDataYAML(_ yaml: String) throws -> AppData {
             flushItem(); section = .links; links = []
         } else if trimmed == "timerSlots:" {
             flushItem(); section = .timerSlots; timerSlots = []
+        } else if trimmed == "checkStates:" {
+            flushItem(); section = .checkStates; checkStates = [:]
 
         } else if trimmed == "users: []" {
             flushItem(); section = .none; users = []
@@ -149,6 +187,8 @@ private func decodeAppDataYAML(_ yaml: String) throws -> AppData {
             flushItem(); section = .none; links = []
         } else if trimmed == "timerSlots: []" {
             flushItem(); section = .none; timerSlots = []
+        } else if trimmed == "checkStates: []" {
+            flushItem(); section = .none; checkStates = [:]
 
         } else if line.hasPrefix("  - ") {
             // 新しいリスト項目の開始
@@ -169,6 +209,7 @@ private func decodeAppDataYAML(_ yaml: String) throws -> AppData {
     result.links = links
     result.timerSlots = timerSlots
     result.lastModified = lastModified
+    result.checkStates = checkStates
     result.ensureSlots()
     return result
 }

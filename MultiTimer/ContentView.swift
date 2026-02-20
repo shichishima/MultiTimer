@@ -7,9 +7,20 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var hSizeClass
     #endif
 
+    @State private var hoveredCell: (slotId: String, userId: String)? = nil
+
     var body: some View {
         Group {
-            #if os(iOS)
+            #if os(macOS)
+            if store.dataFolderURL == nil {
+                setupRequiredView
+            } else {
+                GeometryReader { geo in
+                    timerGrid
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
+            }
+            #else
             if hSizeClass == .compact {
                 // 縦画面: 横スクロール
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -22,11 +33,6 @@ struct ContentView: View {
                     timerGrid
                         .frame(width: geo.size.width, height: geo.size.height)
                 }
-            }
-            #else
-            GeometryReader { geo in
-                timerGrid
-                    .frame(width: geo.size.width, height: geo.size.height)
             }
             #endif
         }
@@ -42,6 +48,23 @@ struct ContentView: View {
                     .padding(.top, 4)
             }
         }
+        .overlay {
+            if store.isLoading {
+                Color.gray.opacity(0.4)
+                    .ignoresSafeArea()
+                ProgressView("読み込み中...")
+                    .progressViewStyle(.circular)
+                    .padding(20)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    private var setupRequiredView: some View {
+        Text("設定画面から共有データを指定してください")
+            .font(.title2)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var timerGrid: some View {
@@ -59,6 +82,7 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     ForEach(columns) { user in
                         HeaderCellView(name: user.name, width: cellW, height: cellH)
+                            .onTapGesture(count: 2) { store.reloadFromFile() }
                     }
                 }
                 // タイマー行 (最大4行)
@@ -68,8 +92,20 @@ struct ContentView: View {
                             let slotIds = store.data.slotIds(for: user.id)
                             if rowIndex < slotIds.count {
                                 let slotId = slotIds[rowIndex]
-                                TimerCellView(slotId: slotId, userId: user.id,
-                                              cellWidth: cellW, cellHeight: cellH)
+                                TimerCellView(
+                                    slotId: slotId,
+                                    userId: user.id,
+                                    cellWidth: cellW,
+                                    cellHeight: cellH,
+                                    isPartnerHighlighted: hoveredCell?.slotId == slotId && hoveredCell?.userId != user.id,
+                                    onHoverChanged: { isHovering in
+                                        if isHovering {
+                                            hoveredCell = (slotId: slotId, userId: user.id)
+                                        } else if hoveredCell?.slotId == slotId && hoveredCell?.userId == user.id {
+                                            hoveredCell = nil
+                                        }
+                                    }
+                                )
                             } else {
                                 // 空セル
                                 Rectangle()

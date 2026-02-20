@@ -11,13 +11,71 @@ struct SettingsView: View {
             UsersSettingsView()
                 .tabItem { Label("利用者", systemImage: "person.3") }
                 .tag(0)
+                .disabled(store.dataFolderURL == nil)
 
             LinksSettingsView()
                 .tabItem { Label("連携", systemImage: "link") }
                 .tag(1)
+                .disabled(store.dataFolderURL == nil)
+
+            SharingSettingsView()
+                .tabItem { Label("共有", systemImage: "folder") }
+                .tag(2)
         }
         .frame(minWidth: 560, minHeight: 380)
         .padding()
+        .onAppear {
+            if store.dataFolderURL == nil { selectedTab = 2 }
+        }
+    }
+}
+
+// MARK: - Sharing Settings
+
+private struct SharingSettingsView: View {
+    @Environment(TimerStore.self) private var store
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("共有フォルダの設定")
+                .font(.headline)
+
+            HStack(alignment: .top, spacing: 8) {
+                Text("保存フォルダ:")
+                    .foregroundStyle(.secondary)
+                Text(store.dataFolderURL?.path ?? "未設定")
+                    .foregroundStyle(store.dataFolderURL == nil ? .secondary : .primary)
+                    .lineLimit(3)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button("フォルダを選択...") {
+                selectFolder()
+            }
+            .buttonStyle(.bordered)
+
+            if store.dataFolderURL == nil {
+                Text("フォルダを選択すると MultiTimer.yml が作成され、「利用者」「連携」タブが利用できるようになります。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding()
+    }
+
+    private func selectFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "MultiTimer.yml を保存するフォルダを選択してください"
+        panel.prompt = "選択"
+        if panel.runModal() == .OK, let url = panel.url {
+            store.setDataFolder(url)
+        }
     }
 }
 

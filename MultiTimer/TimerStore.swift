@@ -13,6 +13,8 @@ import UserNotifications
 final class TimerStore {
     var data: AppData = AppData()
     var saveErrorMessage: String? = nil
+    var dataFolderURL: URL? = nil
+    var isLoading: Bool = false
     /// 毎秒インクリメント → これを購読するビューが1秒ごとに再描画される
     var tick: Int = 0
 
@@ -21,7 +23,17 @@ final class TimerStore {
     private var tickTimer: Timer?
 
     init() {
-        loadFromDisk()
+        #if os(macOS)
+        if let url = resolveBookmark() {
+            _ = url.startAccessingSecurityScopedResource()
+            dataFolderURL = url
+            loadFromDisk()
+        } else {
+            data = AppData()
+        }
+        #else
+        data = AppData()
+        #endif
         checkExpiredOnLaunch()
         startTickTimer()
     }
@@ -65,20 +77,68 @@ final class TimerStore {
         saveToDisk()
     }
 
+    // MARK: - Folder Management
+
+    func setDataFolder(_ url: URL) {
+        #if os(macOS)
+        dataFolderURL?.stopAccessingSecurityScopedResource()
+        saveBookmark(url: url)
+        _ = url.startAccessingSecurityScopedResource()
+        #endif
+        dataFolderURL = url
+        let fileURL = url.appendingPathComponent("MultiTimer.yml")
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            loadFromDisk()
+        } else {
+            saveToDisk()
+        }
+    }
+
+    func reloadFromFile() {
+        guard let folder = dataFolderURL else { return }
+        isLoading = true
+        Task {
+            do {
+                let fileURL = folder.appendingPathComponent("MultiTimer.yml")
+                let yaml = try await Task.detached {
+                    try String(contentsOf: fileURL, encoding: .utf8)
+                }.value
+                let newData = try decodeAppDataYAML(yaml)
+                self.data = newData
+                self.saveErrorMessage = nil
+            } catch {
+                self.saveErrorMessage = "読み込み失敗: \(error.localizedDescription)"
+            }
+            self.isLoading = false
+        }
+    }
+
+    // MARK: - Check State
+
+    func toggleCheckState(slotId: String, userId: String) {
+        let key = "\(slotId):\(userId)"
+        data.checkStates[key] = !(data.checkStates[key] ?? false)
+        saveToDisk()
+    }
+
     // MARK: - Local File I/O
 
     private func loadFromDisk() {
+        guard let url = dataFolderURL else {
+            data = AppData()
+            return
+        }
         do {
-            data = try loadAppData()
+            data = try loadAppData(from: url)
         } catch {
-            // ファイルが存在しない場合はデフォルト値のまま
             data = AppData()
         }
     }
 
     private func saveToDisk() {
+        guard let url = dataFolderURL else { return }
         do {
-            try saveAppData(data)
+            try saveAppData(data, to: url)
             saveErrorMessage = nil
         } catch {
             saveErrorMessage = "保存に失敗しました: \(error.localizedDescription)"

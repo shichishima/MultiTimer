@@ -5,6 +5,8 @@ struct TimerCellView: View {
     let userId: String
     let cellWidth: CGFloat
     let cellHeight: CGFloat
+    let isPartnerHighlighted: Bool
+    let onHoverChanged: (Bool) -> Void
 
     @Environment(TimerStore.self) private var store
     @State private var showOverlay = false
@@ -60,7 +62,7 @@ struct TimerCellView: View {
                         Text("12:00:00")          // 最大幅の基準 (非表示)
                             .font(timeFont)
                             .hidden()
-                        Text(formatTime(slot?.remainingSeconds ?? 0))
+                        Text(formatTime(isCompleted ? (slot?.originalDuration ?? 0) : (slot?.remainingSeconds ?? 0)))
                             .font(timeFont)
                             .foregroundStyle(isCompleted ? .red : .primary)
                             .lineLimit(1)
@@ -82,8 +84,28 @@ struct TimerCellView: View {
             .background(Color.primary.opacity(0.03))
             .border(Color.gray.opacity(0.2))
             .contentShape(Rectangle())
-            .onTapGesture {
-                showOverlay = true
+
+            // パートナーハイライトオーバーレイ
+            if isPartnerHighlighted {
+                Color.black.opacity(0.45)
+                    .allowsHitTesting(false)
+            }
+
+            // チェックボックス (連携タイマーのみ)
+            if linkColor != nil {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { store.data.checkStates["\(slotId):\(userId)"] ?? false },
+                            set: { _ in store.toggleCheckState(slotId: slotId, userId: userId) }
+                        ))
+                        .labelsHidden()
+                        .controlSize(.small)
+                        .padding(6)
+                    }
+                }
             }
 
             // オーバーレイ
@@ -93,6 +115,10 @@ struct TimerCellView: View {
             }
         }
         .frame(width: cellWidth, height: cellHeight)
+        .onHover { hover in
+            showOverlay = hover
+            onHoverChanged(hover)
+        }
         .popover(isPresented: $showDurationPicker) {
             DurationPickerView { duration in
                 store.startTimer(slotId: slotId, duration: duration)
@@ -121,7 +147,7 @@ struct TimerCellView: View {
                     showOverlay = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: timeFontSize * 0.9))
+                        .font(.system(size: timeFontSize * 1.35))
                         .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
@@ -137,7 +163,7 @@ struct TimerCellView: View {
                             showOverlay = false
                         } label: {
                             Image(systemName: "arrow.clockwise.circle.fill")
-                                .font(.system(size: timeFontSize * 0.85))
+                                .font(.system(size: timeFontSize * 1.275))
                                 .foregroundStyle(.white)
                         }
                         .buttonStyle(.plain)
@@ -148,7 +174,7 @@ struct TimerCellView: View {
                         showDurationPicker = true
                     } label: {
                         Image(systemName: "timer")
-                            .font(.system(size: timeFontSize * 0.85))
+                            .font(.system(size: timeFontSize * 1.275))
                             .foregroundStyle(.white)
                     }
                     .buttonStyle(.plain)
@@ -166,13 +192,11 @@ struct DurationPickerView: View {
     @State private var showCustom = false
     @State private var customHours = ""
     @State private var customMinutes = ""
-    @State private var customSeconds = ""
 
     private var customDuration: TimeInterval {
         let h = TimeInterval(Int(customHours) ?? 0)
         let m = TimeInterval(Int(customMinutes) ?? 0)
-        let s = TimeInterval(Int(customSeconds) ?? 0)
-        return h * 3600 + m * 60 + s
+        return h * 3600 + m * 60
     }
 
     var body: some View {
@@ -225,12 +249,10 @@ struct DurationPickerView: View {
                         VStack(spacing: 10) {
                             // 時間・分・秒の入力フィールド
                             HStack(spacing: 4) {
-                                numericField(text: $customHours,   placeholder: "0")
+                                numericField(text: $customHours,   placeholder: "")
                                 Text("時間").font(.caption).foregroundStyle(.secondary)
-                                numericField(text: $customMinutes, placeholder: "0")
+                                numericField(text: $customMinutes, placeholder: "")
                                 Text("分").font(.caption).foregroundStyle(.secondary)
-                                numericField(text: $customSeconds, placeholder: "0")
-                                Text("秒").font(.caption).foregroundStyle(.secondary)
                             }
 
                             // プレビュー表示
@@ -274,6 +296,7 @@ struct DurationPickerView: View {
     let store = TimerStore()
     let userId = store.data.users[0].id
     let slotId = "solo-\(userId)"
-    return TimerCellView(slotId: slotId, userId: userId, cellWidth: 150, cellHeight: 100)
+    return TimerCellView(slotId: slotId, userId: userId, cellWidth: 150, cellHeight: 100,
+                         isPartnerHighlighted: false, onHoverChanged: { _ in })
         .environment(store)
 }
