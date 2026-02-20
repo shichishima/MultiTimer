@@ -211,6 +211,7 @@ let timerDurations: [TimerDuration] = [
     TimerDuration(label: "10分",   seconds:   600),
     TimerDuration(label: "5分",    seconds:   300),
     TimerDuration(label: "3分",    seconds:   180),
+    TimerDuration(label: "2分",    seconds:   120),
     TimerDuration(label: "1分",    seconds:    60),
 ]
 

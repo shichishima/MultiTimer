@@ -69,11 +69,13 @@ struct TimerCellView: View {
                             .minimumScaleFactor(0.6)
                     }
 
-                    // 元の時間 (設定済みの場合のみ)
+                    // 元の時間 (設定済みの場合のみ、時:分のみ表示)
                     if let original = slot?.originalDuration {
-                        Text(formatTime(original))
-                            .font(.system(size: subFontSize).monospacedDigit())
-                            .foregroundStyle(.tertiary)
+                        let h = Int(original) / 3600
+                        let m = (Int(original) % 3600) / 60
+                        Text(String(format: "%d:%02d", h, m))
+                            .font(.system(size: subFontSize * 1.8).monospacedDigit())
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
                     }
                 }
@@ -124,6 +126,7 @@ struct TimerCellView: View {
                 store.startTimer(slotId: slotId, duration: duration)
                 showDurationPicker = false
                 showOverlay = false
+                onHoverChanged(false)
             }
         }
     }
@@ -145,6 +148,7 @@ struct TimerCellView: View {
                 Button {
                     store.stopTimer(slotId: slotId)
                     showOverlay = false
+                    onHoverChanged(false)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: timeFontSize * 1.35))
@@ -161,6 +165,7 @@ struct TimerCellView: View {
                                 store.startTimer(slotId: slotId, duration: dur)
                             }
                             showOverlay = false
+                            onHoverChanged(false)
                         } label: {
                             Image(systemName: "arrow.clockwise.circle.fill")
                                 .font(.system(size: timeFontSize * 1.275))
