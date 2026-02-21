@@ -183,7 +183,7 @@ final class TimerStore {
 
     private func playSound() {
         #if canImport(AppKit)
-        if let sound = NSSound(named: "Pop") {
+        if let sound = NSSound(named: "Sosumi") {
             sound.play()
         } else {
             NSSound.beep()

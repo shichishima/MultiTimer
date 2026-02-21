@@ -291,6 +291,10 @@ struct DurationPickerView: View {
             .textFieldStyle(.roundedBorder)
             .frame(width: 40)
             .multilineTextAlignment(.center)
+            .onChange(of: text.wrappedValue) { _, newValue in
+                let filtered = newValue.filter { $0.isNumber }
+                if filtered != newValue { text.wrappedValue = filtered }
+            }
             #if os(iOS)
             .keyboardType(.numberPad)
             #endif
