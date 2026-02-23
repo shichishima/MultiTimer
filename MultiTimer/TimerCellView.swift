@@ -19,6 +19,14 @@ struct TimerCellView: View {
     private var isRunning: Bool { slot?.isRunning ?? false }
     private var isCompleted: Bool { slot?.isCompletedNaturally ?? false }
     private var hasOriginal: Bool { slot?.originalDuration != nil }
+    private var isChecked: Bool { store.data.checkStates["\(slotId):\(userId)"] ?? false }
+
+    private var completedTimeColor: Color {
+        guard isCompleted else { return .primary }
+        // チェックボックスあり(連携タイマー)かつOFFなら薄赤
+        if linkColor != nil && !isChecked { return Color.red.opacity(0.4) }
+        return .red
+    }
 
     // フォントサイズをセルサイズから算出
     private var timeFontSize: CGFloat { cellHeight * 0.30 }
@@ -64,7 +72,7 @@ struct TimerCellView: View {
                             .hidden()
                         Text(formatTime(isCompleted ? (slot?.originalDuration ?? 0) : (slot?.remainingSeconds ?? 0)))
                             .font(timeFont)
-                            .foregroundStyle(isCompleted ? .red : .primary)
+                            .foregroundStyle(completedTimeColor)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                     }
