@@ -45,12 +45,12 @@ struct TimerCellView: View {
                     // 連携先ユーザー名
                     if let name = partnerName {
                         Text(name)
-                            .font(.system(size: subFontSize, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: subFontSize * 1.3, weight: .medium))
+                            .foregroundStyle(.black)
                             .lineLimit(1)
                     } else {
                         Text(" ")
-                            .font(.system(size: subFontSize))
+                            .font(.system(size: subFontSize * 1.3))
                     }
 
                     // 残り時間:

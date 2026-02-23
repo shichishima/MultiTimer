@@ -74,14 +74,15 @@ struct ContentView: View {
             let columns = store.data.visibleUsers
             let colCount = max(1, columns.count)
             let cellW = geo.size.width / CGFloat(colCount)
-            // 5行 (1見出し + 4タイマー)
-            let cellH = geo.size.height / 5.0
+            // 見出し行は全体の1/5より30%小さく、タイマー行は残り領域を4等分
+            let headerH = geo.size.height / 5.0 * 0.7
+            let timerCellH = (geo.size.height - headerH) / 4.0
 
             VStack(spacing: 0) {
                 // ヘッダー行
                 HStack(spacing: 0) {
                     ForEach(columns) { user in
-                        HeaderCellView(name: user.name, width: cellW, height: cellH)
+                        HeaderCellView(name: user.name, width: cellW, height: headerH)
                             .onTapGesture(count: 2) { store.reloadFromFile() }
                     }
                 }
@@ -96,7 +97,7 @@ struct ContentView: View {
                                     slotId: slotId,
                                     userId: user.id,
                                     cellWidth: cellW,
-                                    cellHeight: cellH,
+                                    cellHeight: timerCellH,
                                     isPartnerHighlighted: hoveredCell?.slotId == slotId && hoveredCell?.userId != user.id,
                                     onHoverChanged: { isHovering in
                                         if isHovering {
@@ -110,7 +111,7 @@ struct ContentView: View {
                                 // 空セル
                                 Rectangle()
                                     .fill(Color.clear)
-                                    .frame(width: cellW, height: cellH)
+                                    .frame(width: cellW, height: timerCellH)
                                     .border(Color.gray.opacity(0.15))
                             }
                         }
@@ -130,7 +131,7 @@ private struct HeaderCellView: View {
 
     var body: some View {
         Text(name)
-            .font(.system(size: height * 0.35, weight: .semibold))
+            .font(.system(size: height * 0.45, weight: .semibold))
             .lineLimit(1)
             .minimumScaleFactor(0.5)
             .frame(width: width, height: height)
