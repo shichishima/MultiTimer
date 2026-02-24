@@ -32,6 +32,22 @@ func resolveBookmark() -> URL? {
         return nil
     }
 }
+#elseif os(iOS)
+private let bookmarkKey = "dataFolderBookmark"
+
+func saveBookmark(url: URL) {
+    if let data = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) {
+        UserDefaults.standard.set(data, forKey: bookmarkKey)
+    }
+}
+
+func resolveBookmark() -> URL? {
+    guard let data = UserDefaults.standard.data(forKey: bookmarkKey) else { return nil }
+    var isStale = false
+    guard let url = try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &isStale) else { return nil }
+    if isStale { saveBookmark(url: url) }
+    return url
+}
 #endif
 
 // MARK: - Save / Load

@@ -6,10 +6,17 @@ struct MultiTimerApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if os(iOS)
+            iOSRootView()
+                .environment(store)
+            #else
             ContentView()
                 .environment(store)
+            #endif
         }
+        #if os(macOS)
         .defaultSize(width: 800, height: 520)
+        #endif
 
         #if os(macOS)
         Settings {

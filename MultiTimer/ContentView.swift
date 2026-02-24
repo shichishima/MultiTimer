@@ -3,37 +3,43 @@ import SwiftUI
 struct ContentView: View {
     @Environment(TimerStore.self) private var store
 
+    @State private var activeCell: (slotId: String, userId: String)? = nil
     #if os(iOS)
-    @Environment(\.horizontalSizeClass) private var hSizeClass
+    @State private var scale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
     #endif
 
-    @State private var hoveredCell: (slotId: String, userId: String)? = nil
-
     var body: some View {
+        let _ = store.tick  // 毎秒再描画トリガー
         Group {
             #if os(macOS)
             if store.dataFolderURL == nil {
                 setupRequiredView
             } else {
                 GeometryReader { geo in
-                    timerGrid
+                    let cols = max(1, store.data.visibleUsers.count)
+                    let cW = geo.size.width / CGFloat(cols)
+                    let hH = geo.size.height / 5.0 * 0.7
+                    let tH = (geo.size.height - hH) / 4.0
+                    timerGridContent(cellW: cW, timerCellH: tH, headerH: hH)
                         .frame(width: geo.size.width, height: geo.size.height)
                 }
             }
             #else
-            if hSizeClass == .compact {
-                // 縦画面: 横スクロール
-                ScrollView(.horizontal, showsIndicators: false) {
-                    timerGrid
-                        .frame(minWidth: CGFloat(store.data.visibleUsers.count) * 120)
-                }
-            } else {
-                // 横画面: 全表示
-                GeometryReader { geo in
-                    timerGrid
-                        .frame(width: geo.size.width, height: geo.size.height)
-                }
+            // iOS: 固定サイズ + ScrollView + pinch
+            let cellW = 200.0 * scale
+            let timerCellH = 80.0 * scale
+            let headerH = 56.0 * scale
+            let totalW = CGFloat(max(1, store.data.visibleUsers.count)) * cellW
+            ScrollView(.horizontal, showsIndicators: false) {
+                timerGridContent(cellW: cellW, timerCellH: timerCellH, headerH: headerH)
+                    .frame(width: totalW, height: headerH + timerCellH * 4)
             }
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { v in scale = max(0.5, min(1.2, lastScale * v)) }
+                    .onEnded { _ in lastScale = scale }
+            )
             #endif
         }
         .overlay(alignment: .top) {
@@ -67,53 +73,52 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var timerGrid: some View {
-        // store.tick を読むことで毎秒再描画される（@Observable の依存追跡を利用）
-        let _ = store.tick
-        return GeometryReader { geo in
-            let columns = store.data.visibleUsers
-            let colCount = max(1, columns.count)
-            let cellW = geo.size.width / CGFloat(colCount)
-            // 見出し行は全体の1/5より30%小さく、タイマー行は残り領域を4等分
-            let headerH = geo.size.height / 5.0 * 0.7
-            let timerCellH = (geo.size.height - headerH) / 4.0
-
-            VStack(spacing: 0) {
-                // ヘッダー行
+    @ViewBuilder
+    private func timerGridContent(cellW: CGFloat, timerCellH: CGFloat, headerH: CGFloat) -> some View {
+        let columns = store.data.visibleUsers
+        VStack(spacing: 0) {
+            // ヘッダー行
+            HStack(spacing: 0) {
+                ForEach(columns) { user in
+                    HeaderCellView(name: user.name, width: cellW, height: headerH)
+                        .onTapGesture(count: 2) { store.reloadFromFile() }
+                }
+            }
+            // タイマー行
+            ForEach(0..<4, id: \.self) { rowIndex in
                 HStack(spacing: 0) {
                     ForEach(columns) { user in
-                        HeaderCellView(name: user.name, width: cellW, height: headerH)
-                            .onTapGesture(count: 2) { store.reloadFromFile() }
-                    }
-                }
-                // タイマー行 (最大4行)
-                ForEach(0..<4, id: \.self) { rowIndex in
-                    HStack(spacing: 0) {
-                        ForEach(columns) { user in
-                            let slotIds = store.data.slotIds(for: user.id)
-                            if rowIndex < slotIds.count {
-                                let slotId = slotIds[rowIndex]
-                                TimerCellView(
-                                    slotId: slotId,
-                                    userId: user.id,
-                                    cellWidth: cellW,
-                                    cellHeight: timerCellH,
-                                    isPartnerHighlighted: hoveredCell?.slotId == slotId && hoveredCell?.userId != user.id,
-                                    onHoverChanged: { isHovering in
-                                        if isHovering {
-                                            hoveredCell = (slotId: slotId, userId: user.id)
-                                        } else if hoveredCell?.slotId == slotId && hoveredCell?.userId == user.id {
-                                            hoveredCell = nil
+                        let slotIds = store.data.slotIds(for: user.id)
+                        if rowIndex < slotIds.count {
+                            let slotId = slotIds[rowIndex]
+                            TimerCellView(
+                                slotId: slotId,
+                                userId: user.id,
+                                cellWidth: cellW,
+                                cellHeight: timerCellH,
+                                showOverlay: activeCell?.slotId == slotId && activeCell?.userId == user.id,
+                                isPartnerHighlighted: activeCell?.slotId == slotId && activeCell?.userId != user.id,
+                                onHoverChanged: { isHovering in
+                                    if isHovering {
+                                        if activeCell?.slotId == slotId && activeCell?.userId == user.id {
+                                            activeCell = nil  // 同セル再タップ: 解除
+                                        } else {
+                                            activeCell = (slotId: slotId, userId: user.id)
+                                        }
+                                    } else {
+                                        if activeCell?.slotId == slotId && activeCell?.userId == user.id {
+                                            activeCell = nil
                                         }
                                     }
-                                )
-                            } else {
-                                // 空セル
-                                Rectangle()
-                                    .fill(Color.clear)
-                                    .frame(width: cellW, height: timerCellH)
-                                    .border(Color.gray.opacity(0.15))
-                            }
+                                }
+                            )
+                        } else {
+                            Rectangle()
+                                .fill(Color.clear)
+                                .frame(width: cellW, height: timerCellH)
+                                .border(Color.gray.opacity(0.15))
+                                .contentShape(Rectangle())
+                                .onTapGesture { activeCell = nil }  // 空白タップ: 全解除
                         }
                     }
                 }

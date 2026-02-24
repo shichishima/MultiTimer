@@ -32,10 +32,20 @@ final class TimerStore {
             data = AppData()
         }
         #else
-        data = AppData()
+        // iOS
+        if let url = resolveBookmark() {
+            _ = url.startAccessingSecurityScopedResource()
+            dataFolderURL = url
+            loadFromDisk()
+        } else {
+            data = AppData()
+        }
         #endif
         checkExpiredOnLaunch()
         startTickTimer()
+        #if os(iOS)
+        subscribeToLifecycleNotifications()
+        #endif
     }
 
     // MARK: - Timer Operations
@@ -84,6 +94,10 @@ final class TimerStore {
         dataFolderURL?.stopAccessingSecurityScopedResource()
         saveBookmark(url: url)
         _ = url.startAccessingSecurityScopedResource()
+        #elseif os(iOS)
+        dataFolderURL?.stopAccessingSecurityScopedResource()
+        saveBookmark(url: url)
+        _ = url.startAccessingSecurityScopedResource()
         #endif
         dataFolderURL = url
         let fileURL = url.appendingPathComponent("MultiTimer.yml")
@@ -110,6 +124,7 @@ final class TimerStore {
                 self.saveErrorMessage = "読み込み失敗: \(error.localizedDescription)"
             }
             self.isLoading = false
+            self.checkExpiredOnLaunch()
         }
     }
 
@@ -196,6 +211,23 @@ final class TimerStore {
     // MARK: - iOS Local Notifications
 
     #if os(iOS)
+    private func subscribeToLifecycleNotifications() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, let url = self.dataFolderURL else { return }
+            _ = url.startAccessingSecurityScopedResource()
+            self.reloadFromFile()
+        }
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.dataFolderURL?.stopAccessingSecurityScopedResource()
+        }
+    }
+
     private func scheduleNotification(slotId: String, endDate: Date) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.sound, .alert]) { granted, _ in
             guard granted else { return }

@@ -5,11 +5,11 @@ struct TimerCellView: View {
     let userId: String
     let cellWidth: CGFloat
     let cellHeight: CGFloat
+    let showOverlay: Bool
     let isPartnerHighlighted: Bool
     let onHoverChanged: (Bool) -> Void
 
     @Environment(TimerStore.self) private var store
-    @State private var showOverlay = false
     @State private var showDurationPicker = false
 
     private var slot: TimerSlot? { store.data.slot(id: slotId) }
@@ -125,15 +125,15 @@ struct TimerCellView: View {
             }
         }
         .frame(width: cellWidth, height: cellHeight)
-        .onHover { hover in
-            showOverlay = hover
-            onHoverChanged(hover)
-        }
+        #if os(macOS)
+        .onHover { hover in onHoverChanged(hover) }
+        #else
+        .onTapGesture { onHoverChanged(true) }
+        #endif
         .popover(isPresented: $showDurationPicker) {
             DurationPickerView { duration in
                 store.startTimer(slotId: slotId, duration: duration)
                 showDurationPicker = false
-                showOverlay = false
                 onHoverChanged(false)
             }
         }
@@ -148,14 +148,13 @@ struct TimerCellView: View {
             Color.black.opacity(0.45)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    showOverlay = false
+                    onHoverChanged(false)
                 }
 
             if isRunning {
                 // 動作中: × ボタン
                 Button {
                     store.stopTimer(slotId: slotId)
-                    showOverlay = false
                     onHoverChanged(false)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -172,7 +171,6 @@ struct TimerCellView: View {
                             if let dur = slot?.originalDuration {
                                 store.startTimer(slotId: slotId, duration: dur)
                             }
-                            showOverlay = false
                             onHoverChanged(false)
                         } label: {
                             Image(systemName: "arrow.clockwise.circle.fill")
@@ -314,6 +312,6 @@ struct DurationPickerView: View {
     let userId = store.data.users[0].id
     let slotId = "solo-\(userId)"
     return TimerCellView(slotId: slotId, userId: userId, cellWidth: 150, cellHeight: 100,
-                         isPartnerHighlighted: false, onHoverChanged: { _ in })
+                         showOverlay: false, isPartnerHighlighted: false, onHoverChanged: { _ in })
         .environment(store)
 }
