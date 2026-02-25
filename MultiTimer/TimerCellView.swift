@@ -21,11 +21,15 @@ struct TimerCellView: View {
     private var hasOriginal: Bool { slot?.originalDuration != nil }
     private var isChecked: Bool { store.data.checkStates["\(slotId):\(userId)"] ?? false }
 
-    private var completedTimeColor: Color {
-        guard isCompleted else { return .primary }
-        // チェックボックスあり(連携タイマー)かつOFFなら薄赤
-        if linkColor != nil && !isChecked { return Color.red.opacity(0.4) }
-        return .red
+    private var timerTextColor: Color {
+        if isCompleted {
+            // 停止中（自然完了）: 連携+OFFなら薄赤、それ以外は赤
+            if linkColor != nil && !isChecked { return Color.red.opacity(0.4) }
+            return .red
+        }
+        // 動作中: 連携+OFFなら70%グレー、それ以外は黒
+        if isRunning && linkColor != nil && !isChecked { return Color(white: 0.7) }
+        return .primary
     }
 
     // フォントサイズをセルサイズから算出
@@ -72,7 +76,7 @@ struct TimerCellView: View {
                             .hidden()
                         Text(formatTime(isCompleted ? (slot?.originalDuration ?? 0) : (slot?.remainingSeconds ?? 0)))
                             .font(timeFont)
-                            .foregroundStyle(completedTimeColor)
+                            .foregroundStyle(timerTextColor)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                     }
