@@ -113,8 +113,11 @@ struct AppData: Codable {
         for link in links where link.involves(userId) {
             ids.append("link-\(link.id)")
         }
-        return ids.sorted {
-            (slot(id: $0)?.remainingSeconds ?? 0) < (slot(id: $1)?.remainingSeconds ?? 0)
+        return ids.sorted { a, b in
+            let aSeconds = slot(id: a)?.remainingSeconds ?? 0
+            let bSeconds = slot(id: b)?.remainingSeconds ?? 0
+            if aSeconds != bSeconds { return aSeconds < bSeconds }
+            return a < b  // 同値時はIDで安定ソート（停止中タイマーの順序固定）
         }
     }
 
