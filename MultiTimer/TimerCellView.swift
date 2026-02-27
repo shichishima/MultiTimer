@@ -15,6 +15,11 @@ struct TimerCellView: View {
     private var slot: TimerSlot? { store.data.slot(id: slotId) }
     private var linkColor: Color? { store.data.linkColor(slotId: slotId) }
     private var partnerName: String? { store.data.partnerName(slotId: slotId, viewingAs: userId) }
+    private var linkedDisplay: String? {
+        guard let partner = partnerName else { return nil }
+        let myName = store.data.userName(id: userId)
+        return "\(myName)・\(partner)"
+    }
 
     private var isRunning: Bool { slot?.isRunning ?? false }
     private var isCompleted: Bool { slot?.isCompletedNaturally ?? false }
@@ -33,7 +38,7 @@ struct TimerCellView: View {
     }
 
     // フォントサイズをセルサイズから算出
-    private var timeFontSize: CGFloat { cellHeight * 0.30 }
+    private var timeFontSize: CGFloat { min(cellHeight * 0.30, (cellWidth - colorBarWidth - 8) / 5.0) }
     private var subFontSize: CGFloat { cellHeight * 0.12 }
     private var colorBarWidth: CGFloat { cellWidth * 0.055 }
 
@@ -54,15 +59,24 @@ struct TimerCellView: View {
 
                 // コンテンツ: VStack をセルにセンタリング
                 VStack(alignment: .center, spacing: 2) {
-                    // 連携先ユーザー名
-                    if let name = partnerName {
-                        Text(name)
+                    // 連携表示「連携元名〜連携先名」
+                    if let display = linkedDisplay {
+                        Text(display)
+                            #if os(iOS)
+                            .font(.system(size: timeFontSize * 0.64, weight: .medium))
+                            #else
                             .font(.system(size: subFontSize * 1.3, weight: .medium))
+                            #endif
                             .foregroundStyle(.black)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.5)
                     } else {
                         Text(" ")
+                            #if os(iOS)
+                            .font(.system(size: timeFontSize * 0.64))
+                            #else
                             .font(.system(size: subFontSize * 1.3))
+                            #endif
                     }
 
                     // 残り時間:
@@ -77,8 +91,6 @@ struct TimerCellView: View {
                         Text(formatTime(isCompleted ? (slot?.originalDuration ?? 0) : (slot?.remainingSeconds ?? 0)))
                             .font(timeFont)
                             .foregroundStyle(timerTextColor)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
                     }
 
                     // 元の時間 (設定済みの場合のみ、時:分のみ表示)
@@ -86,7 +98,7 @@ struct TimerCellView: View {
                         let h = Int(original) / 3600
                         let m = (Int(original) % 3600) / 60
                         Text(String(format: "%d:%02d", h, m))
-                            .font(.system(size: subFontSize * 1.8).monospacedDigit())
+                            .font(.system(size: timeFontSize * 0.8).monospacedDigit())
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                     }
@@ -111,13 +123,15 @@ struct TimerCellView: View {
                     Spacer()
                     HStack {
                         Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { store.data.checkStates["\(slotId):\(userId)"] ?? false },
-                            set: { _ in store.toggleCheckState(slotId: slotId, userId: userId) }
-                        ))
-                        .labelsHidden()
-                        .controlSize(.small)
-                        .padding(6)
+                        Button {
+                            store.toggleCheckState(slotId: slotId, userId: userId)
+                        } label: {
+                            Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: subFontSize * 2.0))
+                                .foregroundStyle(isChecked ? Color.accentColor : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(4)
                     }
                 }
             }
@@ -204,6 +218,7 @@ struct TimerCellView: View {
 struct DurationPickerView: View {
     let onSelect: (TimeInterval) -> Void
 
+    @Environment(\.dismiss) private var dismiss
     @State private var showCustom = false
     @State private var customHours = ""
     @State private var customMinutes = ""
@@ -215,68 +230,55 @@ struct DurationPickerView: View {
     }
 
     var body: some View {
+        #if os(macOS)
         VStack(spacing: 0) {
             Text("タイマー時間を選択")
                 .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 10)
-
             Divider()
-
             ScrollView {
                 VStack(spacing: 0) {
-                    // プリセット一覧
                     ForEach(timerDurations, id: \.seconds) { d in
                         Button {
                             onSelect(d.seconds)
                         } label: {
                             Text(d.label)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 16)
+                                .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         Divider()
                     }
-
-                    // カスタム行
                     Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            showCustom.toggle()
-                        }
+                        withAnimation(.easeInOut(duration: 0.2)) { showCustom.toggle() }
                     } label: {
                         HStack {
-                            Text("カスタム")
-                            Spacer()
+                            Text("カスタム").frame(maxWidth: .infinity, alignment: .leading)
                             Image(systemName: showCustom ? "chevron.up" : "chevron.down")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(.system(size: 12)).foregroundStyle(.secondary)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-
                     if showCustom {
                         Divider()
-                        VStack(spacing: 10) {
-                            // 時間・分・秒の入力フィールド
+                        VStack(spacing: 8) {
                             HStack(spacing: 4) {
-                                numericField(text: $customHours,   placeholder: "")
-                                Text("時間").font(.caption).foregroundStyle(.secondary)
+                                numericField(text: $customHours, placeholder: "")
+                                Text("時間").font(.system(size: 12)).foregroundStyle(.secondary)
                                 numericField(text: $customMinutes, placeholder: "")
-                                Text("分").font(.caption).foregroundStyle(.secondary)
+                                Text("分").font(.system(size: 12)).foregroundStyle(.secondary)
                             }
-
-                            // プレビュー表示
                             if customDuration > 0 {
                                 Text(formatTime(customDuration))
-                                    .font(.system(.body, design: .monospaced).bold())
+                                    .font(.system(size: 16, design: .monospaced).bold())
                                     .foregroundStyle(.secondary)
                             }
-
                             Button("開始") {
                                 let dur = customDuration
                                 if dur > 0 { onSelect(dur) }
@@ -294,6 +296,95 @@ struct DurationPickerView: View {
         }
         .frame(width: 200)
         .frame(maxHeight: 500)
+        #else
+        VStack(spacing: 0) {
+            // 最上段: キャンセルボタン右上
+            HStack {
+                Spacer()
+                Button("キャンセル") { dismiss() }
+                    .font(.subheadline)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
+
+            // 一段下: タイトル
+            Text("タイマー時間を選択")
+                .font(.system(size: 20, weight: .semibold))
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+
+            Divider()
+
+            // 選択エリア（残り全て使用）
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(timerDurations, id: \.seconds) { d in
+                        Button {
+                            onSelect(d.seconds)
+                        } label: {
+                            Text(d.label)
+                                .font(.system(size: 20))
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                    }
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { showCustom.toggle() }
+                    } label: {
+                        ZStack {
+                            Text("カスタム")
+                                .font(.system(size: 20))
+                                .frame(maxWidth: .infinity, alignment: .center)
+                            HStack {
+                                Spacer()
+                                Image(systemName: showCustom ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if showCustom {
+                        Divider()
+                        VStack(spacing: 10) {
+                            HStack(spacing: 4) {
+                                numericField(text: $customHours, placeholder: "")
+                                Text("時間").font(.system(size: 14)).foregroundStyle(.secondary)
+                                numericField(text: $customMinutes, placeholder: "")
+                                Text("分").font(.system(size: 14)).foregroundStyle(.secondary)
+                            }
+                            if customDuration > 0 {
+                                Text(formatTime(customDuration))
+                                    .font(.system(size: 20, design: .monospaced).bold())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Button("開始") {
+                                let dur = customDuration
+                                if dur > 0 { onSelect(dur) }
+                            }
+                            .disabled(customDuration <= 0)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .keyboardShortcut(.return, modifiers: [])
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 14)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #endif
     }
 
     private func numericField(text: Binding<String>, placeholder: String) -> some View {

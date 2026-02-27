@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 #if os(macOS)
 
@@ -11,12 +12,12 @@ struct SettingsView: View {
             UsersSettingsView()
                 .tabItem { Label("利用者", systemImage: "person.3") }
                 .tag(0)
-                .disabled(store.dataFolderURL == nil)
+                .disabled(store.dataFileURL == nil)
 
             LinksSettingsView()
                 .tabItem { Label("連携", systemImage: "link") }
                 .tag(1)
-                .disabled(store.dataFolderURL == nil)
+                .disabled(store.dataFileURL == nil)
 
             SharingSettingsView()
                 .tabItem { Label("共有", systemImage: "folder") }
@@ -25,7 +26,7 @@ struct SettingsView: View {
         .frame(minWidth: 560, minHeight: 380)
         .padding()
         .onAppear {
-            if store.dataFolderURL == nil { selectedTab = 2 }
+            if store.dataFileURL == nil { selectedTab = 2 }
         }
     }
 }
@@ -37,26 +38,33 @@ private struct SharingSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("共有フォルダの設定")
+            Text("データファイルの設定")
                 .font(.headline)
 
             HStack(alignment: .top, spacing: 8) {
-                Text("保存フォルダ:")
+                Text("データファイル:")
                     .foregroundStyle(.secondary)
-                Text(store.dataFolderURL?.path ?? "未設定")
-                    .foregroundStyle(store.dataFolderURL == nil ? .secondary : .primary)
+                Text(store.dataFileURL?.path ?? "未設定")
+                    .foregroundStyle(store.dataFileURL == nil ? .secondary : .primary)
                     .lineLimit(3)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Button("フォルダを選択...") {
-                selectFolder()
-            }
-            .buttonStyle(.bordered)
+            HStack(spacing: 12) {
+                Button("データファイルを指定...") {
+                    selectFile()
+                }
+                .buttonStyle(.bordered)
 
-            if store.dataFolderURL == nil {
-                Text("フォルダを選択すると MultiTimer.yml が作成され、「利用者」「連携」タブが利用できるようになります。")
+                Button("新規にデータファイルを作成する...") {
+                    createFile()
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if store.dataFileURL == nil {
+                Text("データファイルを指定すると、「利用者」「連携」タブが利用できるようになります。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -66,15 +74,27 @@ private struct SharingSettingsView: View {
         .padding()
     }
 
-    private func selectFolder() {
+    private func selectFile() {
         let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
-        panel.message = "MultiTimer.yml を保存するフォルダを選択してください"
+        panel.allowedContentTypes = [UTType(filenameExtension: "yml"), UTType(filenameExtension: "yaml")].compactMap { $0 }
+        panel.message = "MultiTimer.yml を選択してください"
         panel.prompt = "選択"
         if panel.runModal() == .OK, let url = panel.url {
-            store.setDataFolder(url)
+            store.setDataFile(url)
+        }
+    }
+
+    private func createFile() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "yml")].compactMap { $0 }
+        panel.nameFieldStringValue = "MultiTimer.yml"
+        panel.message = "データファイルの保存場所を選択してください"
+        panel.prompt = "作成"
+        if panel.runModal() == .OK, let url = panel.url {
+            store.setDataFile(url)
         }
     }
 }

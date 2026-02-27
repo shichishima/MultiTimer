@@ -5,15 +5,15 @@ struct ContentView: View {
 
     @State private var activeCell: (slotId: String, userId: String)? = nil
     #if os(iOS)
-    @State private var scale: CGFloat = 1.0
-    @State private var lastScale: CGFloat = 1.0
+    @State private var scale: CGFloat = 0.6
+    @State private var lastScale: CGFloat = 0.6
     #endif
 
     var body: some View {
         let _ = store.tick  // 毎秒再描画トリガー
         Group {
             #if os(macOS)
-            if store.dataFolderURL == nil {
+            if store.dataFileURL == nil {
                 setupRequiredView
             } else {
                 GeometryReader { geo in
@@ -26,20 +26,24 @@ struct ContentView: View {
                 }
             }
             #else
-            // iOS: 固定サイズ + ScrollView + pinch
-            let cellW = 200.0 * scale
-            let timerCellH = 80.0 * scale
-            let headerH = 56.0 * scale
-            let totalW = CGFloat(max(1, store.data.visibleUsers.count)) * cellW
-            ScrollView(.horizontal, showsIndicators: false) {
-                timerGridContent(cellW: cellW, timerCellH: timerCellH, headerH: headerH)
-                    .frame(width: totalW, height: headerH + timerCellH * 4)
+            // iOS: GeometryReader で画面いっぱい + 横スクロール + pinch
+            GeometryReader { geo in
+                let cols = max(1, store.data.visibleUsers.count)
+                let hH = geo.size.height / 5.0 * 0.7
+                let tH = (geo.size.height - hH) / 4.0
+                let cW = max(min(tH * 1.5 * scale, 200), 150)
+                let totalW = CGFloat(cols) * cW
+                ScrollView(.horizontal, showsIndicators: false) {
+                    timerGridContent(cellW: cW, timerCellH: tH, headerH: hH)
+                        .frame(width: totalW, height: geo.size.height)
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+                .simultaneousGesture(
+                    MagnificationGesture()
+                        .onChanged { v in scale = max(0.5, min(1.2, lastScale * v)) }
+                        .onEnded { _ in lastScale = scale }
+                )
             }
-            .simultaneousGesture(
-                MagnificationGesture()
-                    .onChanged { v in scale = max(0.5, min(1.2, lastScale * v)) }
-                    .onEnded { _ in lastScale = scale }
-            )
             #endif
         }
         .overlay(alignment: .top) {
@@ -56,12 +60,11 @@ struct ContentView: View {
         }
         .overlay {
             if store.isLoading {
-                Color.gray.opacity(0.4)
-                    .ignoresSafeArea()
-                ProgressView("読み込み中...")
+                ProgressView()
                     .progressViewStyle(.circular)
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .allowsHitTesting(false)
             }
         }
     }
