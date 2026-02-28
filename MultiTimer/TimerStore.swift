@@ -27,6 +27,7 @@ final class TimerStore {
     /// ファイル変更監視
     private var fileChangePresenter: FileChangePresenter?
     private var reloadDebounceTask: Task<Void, Never>?
+    private var reloadTask: Task<Void, Never>?
 
     #if os(iOS)
     private let notificationDelegate = NotificationDelegate()
@@ -121,8 +122,11 @@ final class TimerStore {
 
     func reloadFromFile(showLoading: Bool = true, checkExpired: Bool = true) {
         guard let fileURL = dataFileURL else { return }
+        // 自動再読み込みは進行中タスクがあればスキップ（NSFileCoordinator blocking によるスレッドプール枯渇を防ぐ）
+        if !showLoading, reloadTask != nil { return }
+        reloadTask?.cancel()
         if showLoading { isLoading = true }
-        Task {
+        reloadTask = Task {
             do {
                 let yaml = try await Task.detached {
                     try self.coordinatedRead(from: fileURL)
@@ -130,10 +134,13 @@ final class TimerStore {
                 let newData = try decodeAppDataYAML(yaml)
                 self.data = newData
                 self.saveErrorMessage = nil
+            } catch is CancellationError {
+                return  // 後続タスクに引き継ぎ: reloadTask/isLoading はそのまま
             } catch {
                 self.saveErrorMessage = "読み込み失敗: \(error.localizedDescription)"
             }
             self.isLoading = false
+            self.reloadTask = nil
             if checkExpired { self.checkExpiredOnLaunch() }
             #if os(iOS)
             self.refreshNotifications()
@@ -166,6 +173,8 @@ final class TimerStore {
     private func stopFilePresenting() {
         reloadDebounceTask?.cancel()
         reloadDebounceTask = nil
+        reloadTask?.cancel()
+        reloadTask = nil
         if let presenter = fileChangePresenter {
             NSFileCoordinator.removeFilePresenter(presenter)
             fileChangePresenter = nil
