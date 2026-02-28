@@ -9,17 +9,13 @@ struct iOSRootView: View {
     enum AppTab { case timer, share }
 
     var body: some View {
-        contentView
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .safeAreaInset(edge: .bottom, spacing: 16) {
-                customTabBar
-            }
-            .onAppear {
-                selectedTab = store.dataFileURL == nil ? .share : .timer
-            }
-            .onChange(of: store.dataFileURL) { _, newURL in
-                if newURL != nil { selectedTab = .timer }
-            }
+        VStack(spacing: 0) {
+            contentView
+            customTabBar
+        }
+        .onAppear {
+            selectedTab = store.dataFileURL == nil ? .share : .timer
+        }
     }
 
     @ViewBuilder

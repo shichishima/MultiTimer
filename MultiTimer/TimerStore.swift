@@ -35,15 +35,10 @@ final class TimerStore {
 
     init() {
         if let url = resolveBookmark() {
-            _ = url.startAccessingSecurityScopedResource()
             var isDir: ObjCBool = false
             FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
             if !isDir.boolValue {
-                // ファイル or クラウドファイル（未キャッシュで存在確認できない場合も含む）
                 dataFileURL = url
-            } else {
-                // 旧フォルダURLブックマーク → サイレント破棄
-                url.stopAccessingSecurityScopedResource()
             }
         }
         checkExpiredOnLaunch()
@@ -51,9 +46,11 @@ final class TimerStore {
         #if os(iOS)
         UNUserNotificationCenter.current().delegate = notificationDelegate
         subscribeToLifecycleNotifications()
-        #endif
-        reloadFromFile()  // 非同期読み込み（クラウドファイル対応）
+        #else
+        _ = dataFileURL?.startAccessingSecurityScopedResource()
+        reloadFromFile()
         startFilePresenting()
+        #endif
     }
 
     // MARK: - Timer Operations
@@ -135,7 +132,9 @@ final class TimerStore {
                 self.data = newData
                 self.saveErrorMessage = nil
             } catch is CancellationError {
-                return  // 後続タスクに引き継ぎ: reloadTask/isLoading はそのまま
+                self.isLoading = false
+                self.reloadTask = nil
+                return
             } catch {
                 self.saveErrorMessage = "読み込み失敗: \(error.localizedDescription)"
             }
@@ -238,7 +237,9 @@ final class TimerStore {
             previouslyRunningIds.insert(slot.id)
         }
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.checkForNewlyExpired()
+            Task { @MainActor [weak self] in
+                self?.checkForNewlyExpired()
+            }
         }
     }
 
@@ -281,9 +282,10 @@ final class TimerStore {
             object: nil, queue: .main
         ) { [weak self] _ in
             guard let self, let url = self.dataFileURL else { return }
+            // フォアグラウンド復帰時: 再アクセス開始 + ファイル監視再開 + 再読み込み
             _ = url.startAccessingSecurityScopedResource()
             self.startFilePresenting()
-            self.reloadFromFile(showLoading: false, checkExpired: true)
+            self.reloadFromFile(showLoading: true, checkExpired: true)
         }
         NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -345,8 +347,10 @@ private final class FileChangePresenter: NSObject, NSFilePresenter {
     let presentedItemOperationQueue: OperationQueue = .main
     var onChange: (() -> Void)?
 
-    func presentedItemDidChange() {
-        onChange?()
+    nonisolated func presentedItemDidChange() {
+        Task { @MainActor [weak self] in
+            self?.onChange?()
+        }
     }
 }
 
@@ -355,7 +359,7 @@ private final class FileChangePresenter: NSObject, NSFilePresenter {
 #if os(iOS)
 private final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     /// フォアグラウンド中でも通知バナーとサウンドを表示する
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
