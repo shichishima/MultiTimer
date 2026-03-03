@@ -109,7 +109,7 @@ private struct UsersSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("利用者の設定 (最大5人を表示)")
+            Text("利用者の設定 (最大6人を表示)")
                 .font(.headline)
 
             List {
@@ -118,23 +118,14 @@ private struct UsersSettingsView: View {
                         // 表示トグル
                         Toggle("", isOn: $editedUsers[i].isVisible)
                             .labelsHidden()
-                            .disabled(!editedUsers[i].isVisible && visibleCount >= 5)
+                            .disabled(!editedUsers[i].isVisible && visibleCount >= 6)
 
-                        // 名前フィールド (表示ONの時のみ編集可)
+                        // 名前フィールド (常に編集可)
                         TextField("名前", text: $editedUsers[i].name)
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: .infinity)
-                            .disabled(!editedUsers[i].isVisible)
-
-                        // グレーアウト表示
-                        if !editedUsers[i].isVisible && visibleCount >= 5 {
-                            Text("上限")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
                     }
                     .padding(.vertical, 2)
-                    .opacity((!editedUsers[i].isVisible && visibleCount >= 5) ? 0.5 : 1.0)
                 }
                 .onMove { source, dest in
                     editedUsers.move(fromOffsets: source, toOffset: dest)
@@ -146,6 +137,16 @@ private struct UsersSettingsView: View {
             .listStyle(.inset)
 
             HStack {
+                Button("利用者を追加") {
+                    let newUser = AppUser(
+                        name: "利用者\(editedUsers.count + 1)",
+                        isVisible: false,
+                        displayOrder: editedUsers.count
+                    )
+                    editedUsers.append(newUser)
+                }
+                .buttonStyle(.bordered)
+
                 Spacer()
                 Button("適用") { applyChanges() }
                     .buttonStyle(.borderedProminent)

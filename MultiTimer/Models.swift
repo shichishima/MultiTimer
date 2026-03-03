@@ -68,7 +68,7 @@ struct AppData: Codable {
     var checkStates: [String: Bool] = [:]
 
     init() {
-        let names = ["利用者A", "利用者B", "利用者C", "利用者D", "利用者E", "利用者F"]
+        let names = ["利用者A", "利用者B", "利用者C", "利用者D", "利用者E", "利用者F", "利用者G"]
         users = names.enumerated().map { i, name in
             AppUser(name: name, isVisible: i == 0, displayOrder: i)
         }
@@ -127,7 +127,7 @@ struct AppData: Codable {
         users
             .filter { $0.isVisible }
             .sorted { $0.displayOrder < $1.displayOrder }
-            .prefix(5)
+            .prefix(6)
             .map { $0 }
     }
 
