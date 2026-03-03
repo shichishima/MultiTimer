@@ -29,6 +29,8 @@ final class TimerStore {
     private var reloadDebounceTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
 
+    private let lastModifiedCacheKey = "lastKnownLastModified"
+
     #if os(iOS)
     private let notificationDelegate = NotificationDelegate()
     #endif
@@ -104,6 +106,7 @@ final class TimerStore {
             let yaml = try coordinatedRead(from: url)
             debugYAML = String(yaml.prefix(200))
             data = try decodeAppDataYAML(yaml)
+            UserDefaults.standard.set(data.lastModified, forKey: lastModifiedCacheKey)
             saveErrorMessage = nil
         } catch CocoaError.fileReadNoSuchFile, CocoaError.fileNoSuchFile {
             // ファイルが存在しない（新規作成）→ 書き出して作成
@@ -129,8 +132,15 @@ final class TimerStore {
                     try self.coordinatedRead(from: fileURL)
                 }.value
                 let newData = try decodeAppDataYAML(yaml)
-                self.data = newData
-                self.saveErrorMessage = nil
+                // クラウド同期による古いファイルの巻き戻しを検出して無視する
+                if let cached = UserDefaults.standard.object(forKey: self.lastModifiedCacheKey) as? Date,
+                   newData.lastModified < cached {
+                    // ファイルのlastModifiedがキャッシュより古い → スキップ
+                } else {
+                    self.data = newData
+                    UserDefaults.standard.set(newData.lastModified, forKey: self.lastModifiedCacheKey)
+                    self.saveErrorMessage = nil
+                }
             } catch is CancellationError {
                 self.isLoading = false
                 self.reloadTask = nil
@@ -212,6 +222,7 @@ final class TimerStore {
     private func saveToDisk() {
         guard let url = dataFileURL else { return }
         let snapshot = data
+        UserDefaults.standard.set(snapshot.lastModified, forKey: lastModifiedCacheKey)
         Task.detached { [weak self] in
             do {
                 try saveAppData(snapshot, to: url)
