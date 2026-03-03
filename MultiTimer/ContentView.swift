@@ -28,21 +28,29 @@ struct ContentView: View {
             #else
             // iOS: GeometryReader で画面いっぱい + 横スクロール + pinch
             GeometryReader { geo in
+                let topPad: CGFloat = 24
+                let bottomPad: CGFloat = 72
+                let availH = geo.size.height - topPad - bottomPad
                 let cols = max(1, store.data.visibleUsers.count)
-                let hH = geo.size.height / 5.0 * 0.7
-                let tH = (geo.size.height - hH) / 4.0
+                let hH = availH / 5.0 * 0.7
+                let tH = (availH - hH) / 4.0
                 let cW = max(min(tH * 1.5 * scale, 200), 150)
                 let totalW = CGFloat(cols) * cW
-                ScrollView(.horizontal, showsIndicators: false) {
-                    timerGridContent(cellW: cW, timerCellH: tH, headerH: hH)
-                        .frame(width: totalW, height: geo.size.height)
+                VStack(spacing: 0) {
+                    Spacer().frame(height: topPad)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        timerGridContent(cellW: cW, timerCellH: tH, headerH: hH)
+                            .frame(width: totalW, height: availH)
+                    }
+                    .frame(width: geo.size.width, height: availH)
+                    .simultaneousGesture(
+                        MagnificationGesture()
+                            .onChanged { v in scale = max(0.5, min(1.2, lastScale * v)) }
+                            .onEnded { _ in lastScale = scale }
+                    )
+                    Spacer().frame(height: bottomPad)
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
-                .simultaneousGesture(
-                    MagnificationGesture()
-                        .onChanged { v in scale = max(0.5, min(1.2, lastScale * v)) }
-                        .onEnded { _ in lastScale = scale }
-                )
             }
             #endif
         }

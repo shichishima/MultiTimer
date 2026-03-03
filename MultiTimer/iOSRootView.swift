@@ -9,9 +9,13 @@ struct iOSRootView: View {
     enum AppTab { case timer, share }
 
     var body: some View {
-        VStack(spacing: 0) {
-            contentView
-            customTabBar
+        TabView(selection: $selectedTab) {
+            timerView
+                .tabItem { Label("タイマー", systemImage: "timer") }
+                .tag(AppTab.timer)
+            ShareFolderView()
+                .tabItem { Label("共有", systemImage: "folder") }
+                .tag(AppTab.share)
         }
         .onAppear {
             selectedTab = store.dataFileURL == nil ? .share : .timer
@@ -19,47 +23,14 @@ struct iOSRootView: View {
     }
 
     @ViewBuilder
-    private var contentView: some View {
-        switch selectedTab {
-        case .timer:
-            if store.dataFileURL == nil {
-                Text("データファイルを設定してください")
-                    .font(.title2).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ContentView()
-            }
-        case .share:
-            ShareFolderView()
+    private var timerView: some View {
+        if store.dataFileURL == nil {
+            Text("データファイルを設定してください")
+                .font(.title2).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ContentView()
         }
-    }
-
-    private var customTabBar: some View {
-        HStack(spacing: 0) {
-            tabButton(tab: .timer, systemImage: "timer", label: "タイマー")
-            tabButton(tab: .share, systemImage: "folder", label: "共有")
-        }
-        .frame(height: 49)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
-    }
-
-    private func tabButton(tab: AppTab, systemImage: String, label: String) -> some View {
-        Button {
-            selectedTab = tab
-        } label: {
-            VStack(spacing: 3) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 22))
-                Text(label)
-                    .font(.system(size: 10))
-            }
-            .foregroundStyle(selectedTab == tab ? Color.accentColor : Color.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
 
