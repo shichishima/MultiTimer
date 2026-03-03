@@ -13,29 +13,46 @@ import UserNotifications
 final class TimerStore {
     var data: AppData = AppData()
     var saveErrorMessage: String? = nil
-    var dataFolderURL: URL? = nil
+    var dataFileURL: URL? = nil
     var isLoading: Bool = false
     /// 毎秒インクリメント → これを購読するビューが1秒ごとに再描画される
     var tick: Int = 0
+    /// デバッグ用：最後に読んだYAMLの先頭200文字（後で削除）
+    var debugYAML: String = ""
 
     /// 動作中タイマーの満了検知用
     private var previouslyRunningIds: Set<String> = []
     private var tickTimer: Timer?
 
+    /// ファイル変更監視
+    private var fileChangePresenter: FileChangePresenter?
+    private var reloadDebounceTask: Task<Void, Never>?
+    private var reloadTask: Task<Void, Never>?
+
+    private let lastModifiedCacheKey = "lastKnownLastModified"
+
+    #if os(iOS)
+    private let notificationDelegate = NotificationDelegate()
+    #endif
+
     init() {
-        #if os(macOS)
         if let url = resolveBookmark() {
-            _ = url.startAccessingSecurityScopedResource()
-            dataFolderURL = url
-            loadFromDisk()
-        } else {
-            data = AppData()
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+            if !isDir.boolValue {
+                dataFileURL = url
+            }
         }
-        #else
-        data = AppData()
-        #endif
         checkExpiredOnLaunch()
         startTickTimer()
+        #if os(iOS)
+        UNUserNotificationCenter.current().delegate = notificationDelegate
+        subscribeToLifecycleNotifications()
+        #else
+        _ = dataFileURL?.startAccessingSecurityScopedResource()
+        reloadFromFile()
+        startFilePresenting()
+        #endif
     }
 
     // MARK: - Timer Operations
@@ -77,39 +94,66 @@ final class TimerStore {
         saveToDisk()
     }
 
-    // MARK: - Folder Management
+    // MARK: - File Management
 
-    func setDataFolder(_ url: URL) {
-        #if os(macOS)
-        dataFolderURL?.stopAccessingSecurityScopedResource()
-        saveBookmark(url: url)
+    func setDataFile(_ url: URL) {
+        stopFilePresenting()
+        dataFileURL?.stopAccessingSecurityScopedResource()
         _ = url.startAccessingSecurityScopedResource()
-        #endif
-        dataFolderURL = url
-        let fileURL = url.appendingPathComponent("MultiTimer.yml")
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            loadFromDisk()
-        } else {
+        saveBookmark(url: url)
+        dataFileURL = url
+        do {
+            let yaml = try coordinatedRead(from: url)
+            debugYAML = String(yaml.prefix(200))
+            data = try decodeAppDataYAML(yaml)
+            UserDefaults.standard.set(data.lastModified, forKey: lastModifiedCacheKey)
+            saveErrorMessage = nil
+        } catch CocoaError.fileReadNoSuchFile, CocoaError.fileNoSuchFile {
+            // ファイルが存在しない（新規作成）→ 書き出して作成
+            debugYAML = "(file not found → created)"
             saveToDisk()
+        } catch {
+            data = AppData()
+            debugYAML = "(error: \(error))"
+            saveErrorMessage = "読み込み失敗: \(error)"
         }
+        startFilePresenting()
     }
 
-    func reloadFromFile() {
-        guard let folder = dataFolderURL else { return }
-        isLoading = true
-        Task {
+    func reloadFromFile(showLoading: Bool = true, checkExpired: Bool = true) {
+        guard let fileURL = dataFileURL else { return }
+        // 自動再読み込みは進行中タスクがあればスキップ（NSFileCoordinator blocking によるスレッドプール枯渇を防ぐ）
+        if !showLoading, reloadTask != nil { return }
+        reloadTask?.cancel()
+        if showLoading { isLoading = true }
+        reloadTask = Task {
             do {
-                let fileURL = folder.appendingPathComponent("MultiTimer.yml")
                 let yaml = try await Task.detached {
-                    try String(contentsOf: fileURL, encoding: .utf8)
+                    try self.coordinatedRead(from: fileURL)
                 }.value
                 let newData = try decodeAppDataYAML(yaml)
-                self.data = newData
-                self.saveErrorMessage = nil
+                // クラウド同期による古いファイルの巻き戻しを検出して無視する
+                if let cached = UserDefaults.standard.object(forKey: self.lastModifiedCacheKey) as? Date,
+                   newData.lastModified < cached {
+                    // ファイルのlastModifiedがキャッシュより古い → スキップ
+                } else {
+                    self.data = newData
+                    UserDefaults.standard.set(newData.lastModified, forKey: self.lastModifiedCacheKey)
+                    self.saveErrorMessage = nil
+                }
+            } catch is CancellationError {
+                self.isLoading = false
+                self.reloadTask = nil
+                return
             } catch {
                 self.saveErrorMessage = "読み込み失敗: \(error.localizedDescription)"
             }
             self.isLoading = false
+            self.reloadTask = nil
+            if checkExpired { self.checkExpiredOnLaunch() }
+            #if os(iOS)
+            self.refreshNotifications()
+            #endif
         }
     }
 
@@ -121,27 +165,72 @@ final class TimerStore {
         saveToDisk()
     }
 
-    // MARK: - Local File I/O
+    // MARK: - File Change Monitoring
 
-    private func loadFromDisk() {
-        guard let url = dataFolderURL else {
-            data = AppData()
-            return
+    private func startFilePresenting() {
+        stopFilePresenting()
+        guard let url = dataFileURL else { return }
+        let presenter = FileChangePresenter()
+        presenter.presentedItemURL = url
+        presenter.onChange = { [weak self] in
+            self?.scheduleAutoReload()
         }
-        do {
-            data = try loadAppData(from: url)
-        } catch {
-            data = AppData()
+        NSFileCoordinator.addFilePresenter(presenter)
+        fileChangePresenter = presenter
+    }
+
+    private func stopFilePresenting() {
+        reloadDebounceTask?.cancel()
+        reloadDebounceTask = nil
+        reloadTask?.cancel()
+        reloadTask = nil
+        if let presenter = fileChangePresenter {
+            NSFileCoordinator.removeFilePresenter(presenter)
+            fileChangePresenter = nil
         }
     }
 
+    private func scheduleAutoReload() {
+        reloadDebounceTask?.cancel()
+        reloadDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)  // 1秒デバウンス
+            guard let self, !Task.isCancelled, !self.isLoading else { return }
+            self.reloadFromFile(showLoading: false, checkExpired: false)
+        }
+    }
+
+    // MARK: - Local File I/O
+
+    /// NSFileCoordinator 経由でファイルを読む（ファイルプロバイダーに最新版を要求する）
+    nonisolated private func coordinatedRead(from url: URL) throws -> String {
+        var coordinatorError: NSError?
+        var readResult: Result<String, Error> = .failure(
+            CocoaError(.fileReadUnknown)
+        )
+        let coordinator = NSFileCoordinator()
+        coordinator.coordinate(readingItemAt: url, options: [], error: &coordinatorError) { coordURL in
+            do {
+                readResult = .success(try String(contentsOf: coordURL, encoding: .utf8))
+            } catch {
+                readResult = .failure(error)
+            }
+        }
+        if let err = coordinatorError { throw err }
+        return try readResult.get()
+    }
+
     private func saveToDisk() {
-        guard let url = dataFolderURL else { return }
-        do {
-            try saveAppData(data, to: url)
-            saveErrorMessage = nil
-        } catch {
-            saveErrorMessage = "保存に失敗しました: \(error.localizedDescription)"
+        guard let url = dataFileURL else { return }
+        let snapshot = data
+        UserDefaults.standard.set(snapshot.lastModified, forKey: lastModifiedCacheKey)
+        Task.detached { [weak self] in
+            do {
+                try saveAppData(snapshot, to: url)
+                await MainActor.run { self?.saveErrorMessage = nil }
+            } catch {
+                let msg = "保存に失敗しました: \(error.localizedDescription)"
+                await MainActor.run { self?.saveErrorMessage = msg }
+            }
         }
     }
 
@@ -159,7 +248,9 @@ final class TimerStore {
             previouslyRunningIds.insert(slot.id)
         }
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.checkForNewlyExpired()
+            Task { @MainActor [weak self] in
+                self?.checkForNewlyExpired()
+            }
         }
     }
 
@@ -196,12 +287,54 @@ final class TimerStore {
     // MARK: - iOS Local Notifications
 
     #if os(iOS)
+    private func subscribeToLifecycleNotifications() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, let url = self.dataFileURL else { return }
+            // フォアグラウンド復帰時: 再アクセス開始 + ファイル監視再開 + 再読み込み
+            _ = url.startAccessingSecurityScopedResource()
+            self.startFilePresenting()
+            self.reloadFromFile(showLoading: true, checkExpired: true)
+        }
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.stopFilePresenting()
+            self?.dataFileURL?.stopAccessingSecurityScopedResource()
+        }
+    }
+
+    /// 動作中タイマーの通知をすべて再同期する（ファイル経由で外部からタイマーが変化した時に呼ぶ）
+    private func refreshNotifications() {
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        for slot in data.timerSlots {
+            guard slot.isRunning, let endDate = slot.endDate else { continue }
+            scheduleNotification(slotId: slot.id, endDate: endDate)
+        }
+    }
+
     private func scheduleNotification(slotId: String, endDate: Date) {
+        // チェックONのユーザー名を収集
+        var userIds: [String] = []
+        if slotId.hasPrefix("solo-") {
+            userIds = [String(slotId.dropFirst(5))]
+        } else if let link = data.linkForSlot(id: slotId) {
+            userIds = [link.userAId, link.userBId]
+        }
+        let checkedNames = userIds.compactMap { userId -> String? in
+            guard data.checkStates["\(slotId):\(userId)"] == true else { return nil }
+            return data.userName(id: userId)
+        }
+        guard !checkedNames.isEmpty else { return }  // チェックONなし → 通知しない
+
+        let notificationTitle = checkedNames.joined(separator: ", ") + " - カウントダウン終了"
         UNUserNotificationCenter.current().requestAuthorization(options: [.sound, .alert]) { granted, _ in
             guard granted else { return }
             let content = UNMutableNotificationContent()
-            content.title = "タイマー終了"
-            content.body = "カウントダウンが完了しました"
+            content.title = notificationTitle
             content.sound = .default
             let trigger = UNTimeIntervalNotificationTrigger(
                 timeInterval: max(1, endDate.timeIntervalSinceNow),
@@ -217,3 +350,32 @@ final class TimerStore {
     }
     #endif
 }
+
+// MARK: - FileChangePresenter
+
+private final class FileChangePresenter: NSObject, NSFilePresenter {
+    var presentedItemURL: URL?
+    let presentedItemOperationQueue: OperationQueue = .main
+    var onChange: (() -> Void)?
+
+    nonisolated func presentedItemDidChange() {
+        Task { @MainActor [weak self] in
+            self?.onChange?()
+        }
+    }
+}
+
+// MARK: - NotificationDelegate (iOS)
+
+#if os(iOS)
+private final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    /// フォアグラウンド中でも通知バナーとサウンドを表示する
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+}
+#endif

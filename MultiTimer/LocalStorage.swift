@@ -32,28 +32,50 @@ func resolveBookmark() -> URL? {
         return nil
     }
 }
+#elseif os(iOS)
+private let bookmarkKey = "dataFolderBookmark"
+
+func saveBookmark(url: URL) {
+    if let data = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) {
+        UserDefaults.standard.set(data, forKey: bookmarkKey)
+    }
+}
+
+func resolveBookmark() -> URL? {
+    guard let data = UserDefaults.standard.data(forKey: bookmarkKey) else { return nil }
+    var isStale = false
+    guard let url = try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &isStale) else { return nil }
+    if isStale { saveBookmark(url: url) }
+    return url
+}
 #endif
 
 // MARK: - Save / Load
 
-func saveAppData(_ data: AppData, to folderURL: URL) throws {
+nonisolated func saveAppData(_ data: AppData, to fileURL: URL) throws {
     let yaml = encodeAppDataYAML(data)
-    let fileURL = folderURL.appendingPathComponent("MultiTimer.yml")
-    try yaml.write(to: fileURL, atomically: true, encoding: .utf8)
+    var coordinatorError: NSError?
+    var writeError: Error?
+    let coordinator = NSFileCoordinator()
+    coordinator.coordinate(writingItemAt: fileURL, options: .forReplacing, error: &coordinatorError) { coordURL in
+        do {
+            try yaml.write(to: coordURL, atomically: false, encoding: .utf8)
+        } catch {
+            writeError = error
+        }
+    }
+    if let err = coordinatorError { throw err }
+    if let err = writeError { throw err }
 }
 
-func loadAppData(from folderURL: URL) throws -> AppData {
-    let fileURL = folderURL.appendingPathComponent("MultiTimer.yml")
-    guard FileManager.default.fileExists(atPath: fileURL.path) else {
-        return AppData()
-    }
+func loadAppData(from fileURL: URL) throws -> AppData {
     let yaml = try String(contentsOf: fileURL, encoding: .utf8)
     return try decodeAppDataYAML(yaml)
 }
 
 // MARK: - YAML Encoder
 
-private func encodeAppDataYAML(_ data: AppData) -> String {
+nonisolated private func encodeAppDataYAML(_ data: AppData) -> String {
     let iso = ISO8601DateFormatter()
     var lines: [String] = []
 
