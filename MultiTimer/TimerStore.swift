@@ -133,8 +133,9 @@ final class TimerStore {
                 }.value
                 let newData = try decodeAppDataYAML(yaml)
                 // クラウド同期による古いファイルの巻き戻しを検出して無視する
+                // ISO8601は秒精度のためfloor()で秒単位に揃えて比較する
                 if let cached = UserDefaults.standard.object(forKey: self.lastModifiedCacheKey) as? Date,
-                   newData.lastModified < cached {
+                   floor(newData.lastModified.timeIntervalSince1970) < floor(cached.timeIntervalSince1970) {
                     // ファイルのlastModifiedがキャッシュより古い → スキップ
                 } else {
                     self.data = newData
