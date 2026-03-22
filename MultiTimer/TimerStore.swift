@@ -29,6 +29,12 @@ final class TimerStore {
     private var reloadDebounceTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
 
+    #if os(iOS)
+    /// iCloudダウンロード完了を検出するためのメタデータクエリ
+    private var metadataQuery: NSMetadataQuery?
+    private var metadataQueryObserver: NSObjectProtocol?
+    #endif
+
     private let lastModifiedCacheKey = "lastKnownLastModified"
 
     #if os(iOS)
@@ -178,6 +184,9 @@ final class TimerStore {
         }
         NSFileCoordinator.addFilePresenter(presenter)
         fileChangePresenter = presenter
+        #if os(iOS)
+        startMetadataQuery()
+        #endif
     }
 
     private func stopFilePresenting() {
@@ -189,6 +198,9 @@ final class TimerStore {
             NSFileCoordinator.removeFilePresenter(presenter)
             fileChangePresenter = nil
         }
+        #if os(iOS)
+        stopMetadataQuery()
+        #endif
     }
 
     private func scheduleAutoReload() {
@@ -294,8 +306,10 @@ final class TimerStore {
             object: nil, queue: .main
         ) { [weak self] _ in
             guard let self, let url = self.dataFileURL else { return }
-            // フォアグラウンド復帰時: 再アクセス開始 + ファイル監視再開 + 再読み込み
+            // フォアグラウンド復帰時: 再アクセス開始 + ダウンロード要求 + ファイル監視再開 + 再読み込み
             _ = url.startAccessingSecurityScopedResource()
+            // iCloudに最新版のダウンロードを要求する（すでにローカルにある場合はno-op）
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
             self.startFilePresenting()
             self.reloadFromFile(showLoading: true, checkExpired: true)
         }
@@ -348,6 +362,57 @@ final class TimerStore {
 
     private func cancelNotification(slotId: String) {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [slotId])
+    }
+
+    // MARK: - iCloud Metadata Query (iOS)
+
+    /// NSMetadataQuery でiCloudファイルのダウンロード完了を監視する。
+    /// NSFilePresenter.presentedItemDidChange() はリモート変更に対して不安定なため、
+    /// より信頼性の高いこちらで補完する。
+    private func startMetadataQuery() {
+        guard let url = dataFileURL else { return }
+        stopMetadataQuery()
+
+        let query = NSMetadataQuery()
+        // アプリコンテナ外のiCloud Driveファイルには AccessibleUbiquitousExternalDocuments スコープが必要
+        query.searchScopes = [
+            NSMetadataQueryUbiquitousDocumentsScope,
+            NSMetadataQueryUbiquitousDataScope,
+            NSMetadataQueryAccessibleUbiquitousExternalDocumentsScope
+        ]
+        query.predicate = NSPredicate(format: "%K == %@", NSMetadataItemPathKey, url.path)
+
+        let observer = NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidUpdate,
+            object: query,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self, let q = notification.object as? NSMetadataQuery else { return }
+            q.disableUpdates()
+            defer { q.enableUpdates() }
+            for i in 0..<q.resultCount {
+                guard let item = q.result(at: i) as? NSMetadataItem else { continue }
+                let status = item.value(forAttribute: NSMetadataUbiquitousItemDownloadingStatusKey) as? String
+                let isDownloading = item.value(forAttribute: NSMetadataUbiquitousItemIsDownloadingKey) as? Bool ?? false
+                // ダウンロード完了（最新版がローカルに揃った）タイミングでリロード
+                if status == NSMetadataUbiquitousItemDownloadingStatusCurrent && !isDownloading {
+                    self.scheduleAutoReload()
+                }
+            }
+        }
+
+        metadataQueryObserver = observer
+        query.start()
+        metadataQuery = query
+    }
+
+    private func stopMetadataQuery() {
+        if let observer = metadataQueryObserver {
+            NotificationCenter.default.removeObserver(observer)
+            metadataQueryObserver = nil
+        }
+        metadataQuery?.stop()
+        metadataQuery = nil
     }
     #endif
 }
