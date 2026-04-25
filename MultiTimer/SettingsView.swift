@@ -327,6 +327,9 @@ private struct LinkSlotCell: View {
         )
         updated.links.append(newLink)
         updated.ensureSlots()
+        let slotId = "link-\(newLink.id)"
+        updated.checkStates["\(slotId):\(user.id)"] = true
+        updated.checkStates["\(slotId):\(partner.id)"] = true
         store.applySettings(updated)
     }
 
