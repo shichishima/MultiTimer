@@ -1,12 +1,12 @@
 import Foundation
 import SwiftUI
+import UserNotifications
 
 #if canImport(AppKit)
 import AppKit
 #else
 import UIKit
 import AudioToolbox
-import UserNotifications
 #endif
 
 @Observable
@@ -36,12 +36,13 @@ final class TimerStore {
     #endif
 
     private let lastModifiedCacheKey = "lastKnownLastModified"
-
-    #if os(iOS)
     private let notificationDelegate = NotificationDelegate()
-    #endif
 
     init() {
+        UserDefaults.standard.register(defaults: [
+            "macSoundEnabled": true,
+            "macNotificationsEnabled": true
+        ])
         if let url = resolveBookmark() {
             var isDir: ObjCBool = false
             FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
@@ -55,6 +56,7 @@ final class TimerStore {
         UNUserNotificationCenter.current().delegate = notificationDelegate
         subscribeToLifecycleNotifications()
         #else
+        UNUserNotificationCenter.current().delegate = notificationDelegate
         _ = dataFileURL?.startAccessingSecurityScopedResource()
         reloadFromFile()
         startFilePresenting()
@@ -72,9 +74,7 @@ final class TimerStore {
         saveToDisk()
         previouslyRunningIds.insert(slotId)
 
-        #if os(iOS)
-        scheduleNotification(slotId: slotId, endDate: endDate)
-        #endif
+        scheduleNotificationIfNeeded(slotId: slotId, endDate: endDate)
     }
 
     /// タイマーを手動停止(0:00リセット)。endDate = nil, originalDuration は保持
@@ -85,9 +85,7 @@ final class TimerStore {
         saveToDisk()
         previouslyRunningIds.remove(slotId)
 
-        #if os(iOS)
         cancelNotification(slotId: slotId)
-        #endif
     }
 
     // MARK: - Settings Update
@@ -158,9 +156,7 @@ final class TimerStore {
             self.isLoading = false
             self.reloadTask = nil
             if checkExpired { self.checkExpiredOnLaunch() }
-            #if os(iOS)
             self.refreshNotifications()
-            #endif
         }
     }
 
@@ -287,6 +283,7 @@ final class TimerStore {
 
     private func playSound() {
         #if canImport(AppKit)
+        guard UserDefaults.standard.bool(forKey: "macSoundEnabled") else { return }
         if let sound = NSSound(named: "Sosumi") {
             sound.play()
         } else {
@@ -297,7 +294,63 @@ final class TimerStore {
         #endif
     }
 
-    // MARK: - iOS Local Notifications
+    // MARK: - Local Notifications
+
+    private func scheduleNotificationIfNeeded(slotId: String, endDate: Date) {
+        #if canImport(AppKit)
+        guard UserDefaults.standard.bool(forKey: "macNotificationsEnabled") else { return }
+        #endif
+        scheduleNotification(slotId: slotId, endDate: endDate)
+    }
+
+    private func scheduleNotification(slotId: String, endDate: Date) {
+        var userIds: [String] = []
+        if slotId.hasPrefix("solo-") {
+            userIds = [String(slotId.dropFirst(5))]
+        } else if let link = data.linkForSlot(id: slotId) {
+            userIds = [link.userAId, link.userBId]
+        }
+        #if os(iOS)
+        let checkedNames = userIds.compactMap { userId -> String? in
+            guard data.checkStates["\(slotId):\(userId)"] == true else { return nil }
+            return data.userName(id: userId)
+        }
+        guard !checkedNames.isEmpty else { return }
+        let notificationTitle = checkedNames.joined(separator: ", ") + " - カウントダウン終了"
+        #else
+        let names = userIds.map { data.userName(id: $0) }.filter { !$0.isEmpty }
+        guard !names.isEmpty else { return }
+        let notificationTitle = names.joined(separator: ", ") + " - カウントダウン終了"
+        #endif
+
+        UNUserNotificationCenter.current().requestAuthorization(options: [.sound, .alert]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = notificationTitle
+            content.sound = .default
+            let trigger = UNTimeIntervalNotificationTrigger(
+                timeInterval: max(1, endDate.timeIntervalSinceNow),
+                repeats: false
+            )
+            let request = UNNotificationRequest(identifier: slotId, content: content, trigger: trigger)
+            UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+        }
+    }
+
+    private func cancelNotification(slotId: String) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [slotId])
+    }
+
+    private func refreshNotifications() {
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        #if canImport(AppKit)
+        guard UserDefaults.standard.bool(forKey: "macNotificationsEnabled") else { return }
+        #endif
+        for slot in data.timerSlots {
+            guard slot.isRunning, let endDate = slot.endDate else { continue }
+            scheduleNotification(slotId: slot.id, endDate: endDate)
+        }
+    }
 
     #if os(iOS)
     private func subscribeToLifecycleNotifications() {
@@ -320,48 +373,6 @@ final class TimerStore {
             self?.stopFilePresenting()
             self?.dataFileURL?.stopAccessingSecurityScopedResource()
         }
-    }
-
-    /// 動作中タイマーの通知をすべて再同期する（ファイル経由で外部からタイマーが変化した時に呼ぶ）
-    private func refreshNotifications() {
-        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
-        for slot in data.timerSlots {
-            guard slot.isRunning, let endDate = slot.endDate else { continue }
-            scheduleNotification(slotId: slot.id, endDate: endDate)
-        }
-    }
-
-    private func scheduleNotification(slotId: String, endDate: Date) {
-        // チェックONのユーザー名を収集
-        var userIds: [String] = []
-        if slotId.hasPrefix("solo-") {
-            userIds = [String(slotId.dropFirst(5))]
-        } else if let link = data.linkForSlot(id: slotId) {
-            userIds = [link.userAId, link.userBId]
-        }
-        let checkedNames = userIds.compactMap { userId -> String? in
-            guard data.checkStates["\(slotId):\(userId)"] == true else { return nil }
-            return data.userName(id: userId)
-        }
-        guard !checkedNames.isEmpty else { return }  // チェックONなし → 通知しない
-
-        let notificationTitle = checkedNames.joined(separator: ", ") + " - カウントダウン終了"
-        UNUserNotificationCenter.current().requestAuthorization(options: [.sound, .alert]) { granted, _ in
-            guard granted else { return }
-            let content = UNMutableNotificationContent()
-            content.title = notificationTitle
-            content.sound = .default
-            let trigger = UNTimeIntervalNotificationTrigger(
-                timeInterval: max(1, endDate.timeIntervalSinceNow),
-                repeats: false
-            )
-            let request = UNNotificationRequest(identifier: slotId, content: content, trigger: trigger)
-            UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
-        }
-    }
-
-    private func cancelNotification(slotId: String) {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [slotId])
     }
 
     // MARK: - iCloud Metadata Query (iOS)
@@ -431,17 +442,21 @@ private final class FileChangePresenter: NSObject, NSFilePresenter {
     }
 }
 
-// MARK: - NotificationDelegate (iOS)
+// MARK: - NotificationDelegate
 
-#if os(iOS)
 private final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
-    /// フォアグラウンド中でも通知バナーとサウンドを表示する
+    /// フォアグラウンド中でも通知バナーを表示する
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        #if os(iOS)
+        // iOSはバナー＋サウンド
         completionHandler([.banner, .sound])
+        #else
+        // macOSはバナーのみ（サウンドはplaySound()が担当）
+        completionHandler([.banner])
+        #endif
     }
 }
-#endif

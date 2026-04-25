@@ -22,6 +22,10 @@ struct SettingsView: View {
             SharingSettingsView()
                 .tabItem { Label("共有", systemImage: "folder") }
                 .tag(2)
+
+            PreferencesSettingsView()
+                .tabItem { Label("設定", systemImage: "gearshape") }
+                .tag(3)
         }
         .frame(minWidth: 560, minHeight: 380)
         .padding()
@@ -201,7 +205,7 @@ private struct LinksSettingsView: View {
                 ForEach(allUsers) { user in
                     Text(user.name)
                         .font(.subheadline.weight(.semibold))
-                        .frame(width: 180, height: 36)
+                        .frame(width: 108, height: 36)
                         .background(Color.primary.opacity(0.06))
                         .border(Color.gray.opacity(0.3))
                 }
@@ -310,7 +314,7 @@ private struct LinkSlotCell: View {
             }
         }
         .padding(.horizontal, 6)
-        .frame(width: 180, height: 44)
+        .frame(width: 108, height: 44)
         .border(Color.gray.opacity(0.25))
     }
 
@@ -344,6 +348,29 @@ private struct LinkSlotCell: View {
         var updated = store.data
         updated.links[idx].colorHex = color.hexString
         store.applySettings(updated)
+    }
+}
+
+// MARK: - Preferences Settings
+
+private struct PreferencesSettingsView: View {
+    @AppStorage("macNotificationsEnabled") private var notificationsEnabled = true
+    @AppStorage("macSoundEnabled") private var soundEnabled = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("アプリの動作設定")
+                .font(.headline)
+
+            Form {
+                Toggle("通知", isOn: $notificationsEnabled)
+                Toggle("サウンド", isOn: $soundEnabled)
+            }
+            .formStyle(.grouped)
+
+            Spacer()
+        }
+        .padding()
     }
 }
 
