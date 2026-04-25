@@ -164,7 +164,18 @@ final class TimerStore {
 
     func toggleCheckState(slotId: String, userId: String) {
         let key = "\(slotId):\(userId)"
-        data.checkStates[key] = !(data.checkStates[key] ?? false)
+        let wasChecked = data.checkStates[key] ?? false
+        data.checkStates[key] = !wasChecked
+
+        // ONからOFFにした場合、連携先ユーザーのチェックをONにする
+        if wasChecked, let link = data.linkForSlot(id: slotId),
+           let partnerId = link.partner(of: userId) {
+            let partnerKey = "\(slotId):\(partnerId)"
+            if data.checkStates[partnerKey] != true {
+                data.checkStates[partnerKey] = true
+            }
+        }
+
         saveToDisk()
     }
 
